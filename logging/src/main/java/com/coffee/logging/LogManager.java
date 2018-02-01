@@ -1,12 +1,18 @@
 package com.coffee.logging;
 
+import java.beans.PropertyChangeListener;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.security.PrivilegedExceptionAction;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
+import java.util.WeakHashMap;
 
-import com.sun.org.glassfish.external.statistics.annotations.Reset;
+import sun.misc.JavaAWTAccess;
+import sun.misc.SharedSecrets;
 
 public class LogManager {
 	private static final LogManager manager;
@@ -134,6 +140,111 @@ public class LogManager {
 			} finally {
 				initializationDone = true;
 			}
+		}
+	}
+	
+	public static LogManager getLogManager() {
+		if(manager != null) {
+			manager.ensureLogMangerInitialized();
+		}
+		return manager;
+	}
+	
+	private void readPrimordialConfiguration() {
+		if(!readPrimordialConfiguration) {
+			synchronized(this) {
+				if(!readPrimordialConfiguration) {
+					if(System.out == null) {
+						return;
+					}
+					readPrimordialConfiguration = true;
+					try {
+						AccessController.doPrivileged(new PrivilegedExceptionAction<Void>() {
+							@Override
+							public void run() throws Exception {
+								readConfiguration();
+								sun.util.logging.PlatformLogger.redirectPlatformLoggers();
+								return null;
+							}
+						});
+					}catch(Exception ex) {
+						assert false : "Exception raised while reading logging configuration: " + ex;
+					}
+				}
+			}
+		}
+	}
+	@Deprecated
+	public void addPropertyChangeListener(PropertyChangeListener l) throws SecurityException {
+		PropertyChangeListener listener = Objects.requireNonNull(l);
+		checkPermission();
+		synchronized (listenerMap) {
+			Integer value = listenerMap.get(listener);
+			value = (value == null) ? 1 : (value + 1);
+			listenerMap.put(listener, value);
+		}
+	}
+	
+	@Deprecated
+	public void removePropertyChangeListener(PropertyChangeListener l) throws SecurityException {
+		checkPermission();
+		if(l != null) {
+			PropertyChangeListener listener = l;
+			synchronized (listenerMap) {
+				Integer value = listenerMap.get(listener);
+				if(value != null) {
+					int i = value.intValue();
+					if(i == 1) {
+						listenerMap.remove(listener);
+					} else {
+						assert i > 1;
+						listenerMap.put(listener, i-1);
+					}
+				}
+			}
+		}
+	}
+	
+	private WeakHashMap<Object, LoggerContext> contextsMap = null;
+	
+	private LoggerContext getUserContext() {
+		LoggerContext context = null;
+		
+		SecurityManager sm = System.getSecurityManager();
+		JavaAWTAccess javaAwtAccess = SharedSecrets.getJavaAWTAccess();
+		if(sm != null && javaAwtAccess != null) {
+			final Object ecx = javaAwtAccess.getAppletContext();
+			if(ecx != null) {
+				synchronized (javaAwtAccess) {
+					if(contextsMap == null) {
+						contextsMap = new WeakHashMap<Object, LogManager.LoggerContext>();
+					}
+					context = contextsMap.get(ecx);
+					if(context == null) {
+						context = new LoggerContext();
+						contextsMap.put(ecx, context);
+					}
+				}
+			}
+		}
+		return context != null ? context : userContext;
+	}
+	
+	final LoggerContext getSystemContext() {
+		return systemContext;
+	}
+	
+	private List<loggerContext> contexts() {
+		List<LoggerContext> cxs = new ArrayList<LoggerContext>();
+		cxs.add(getSystemContext());
+		cxs.add(getUserContext());
+		return cxs;
+	}
+	
+	Logger demandLogger(String name, String resourceBundleName, Class<?> caller) {
+		Logger result = getLogger(name);
+		if(result == null) {
+			Logger newLogger = new Logger(name, resourceBundleName, caller, this, false);
 		}
 	}
 	
