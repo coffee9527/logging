@@ -10,7 +10,6 @@ import java.util.MissingResourceException;
 import java.util.ResourceBundle;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.logging.Level;
 
 import sun.misc.JavaLangAccess;
 import sun.misc.SharedSecrets;

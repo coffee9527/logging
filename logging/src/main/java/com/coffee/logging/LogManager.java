@@ -9,6 +9,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.security.AccessController;
 import java.security.Permission;
 import java.security.PrivilegedAction;
@@ -968,6 +971,115 @@ public class LogManager {
 		Enumeration<?> enum_ = props.propertyNames();
 		while(enum_.hasMoreElements()) {
 			String key = (String)enum_.nextElement();
+			if(!key.endsWith(".level")) {
+				continue;
+			}
+			int ix = key.length() -6;
+			String name = key.substring(0, ix);
+			Level level = getLevelProperty(key, null);
+			if(level == null) {
+				System.err.println("Bad level value for property: " + key);
+				continue;
+			}
+			for(LoggerContext cx : contexts()) {
+				Logger l = cx.findLogger(name);
+				if(l == null) {
+					continue;
+				}
+				l.setLevel(level);
+			}
+		}
+	}
+	
+	private static LoggingMXBean loggingMXBean = null;
+	
+	private final static String LOGGING_MXBEAN_NAME
+		= "java.util.logging:type=Logging";
+	
+	public static synchronized LoggingMXBean getLoggingMXBean() {
+		if(loggingMXBean == null) {
+			loggingMXBean = new Logging();
+		}
+		return loggingMXBean;
+	}
+	
+	private static class Beans {
+		private static final Class<?> propertyChangeListenerCLass = 
+					getClass("java.beans.PropertyChangeListener");
+		
+		private static final Class<?> propertyChangeEventClass = 
+				getClass("java.beans.PropertyChangeEvent");
+		
+		private static final Method propertyChangeMethod = 
+				getMethod(propertyChangeListenerClass,
+						"propertyChange",
+						propertyChangeEventClass);
+		
+		private static final Constructor<?> propertyEventCtor =
+				getConstructor(propertyChangeEventClass,
+						Object.class,
+						String.class,
+						Object.class,
+						Object.class);
+		
+		private static Class<?> getClass(String name) {
+			try {
+				return Class.forName(name, Beans.class.getClassLoader());
+			}catch(ClassNotFoundException e) {
+				return null;
+			}
+		}
+		
+		private static Constructor<?> getConstructor(Class<?> c,Class<?>... types) {
+			try {
+				return (c==null) ? null : c.getDeclaredConstructor(types);
+			}catch (NoSuchMethodException x) {
+				throw new AssertionError(x);
+			}
+		}
+		
+		private static Method getMethod(Class<?> c, String name, Class<?>... types) {
+			try {
+				return (c==null) ? null : c.getMethod(name, types);
+			}catch (NoSuchMethodException e) {
+                throw new AssertionError(e);
+            }
+		}
+		
+		static boolean isBeansPresent() {
+			return propertyChangeListenerCLass != null && 
+					propertyChangeEventClass != null;
+		}
+		
+		static Object newPropertyChangeEvent(Object source, String prop,
+				Object oldValue, Object newValue) {
+			try {
+				return propertyEventCtor.newInstance(source,prop,oldValue,newValue);
+			}catch (InstantiationException | IllegalAccessException x) {
+                throw new AssertionError(x);
+            } catch (InvocationTargetException x) {
+                Throwable cause = x.getCause();
+                if (cause instanceof Error)
+                    throw (Error)cause;
+                if (cause instanceof RuntimeException)
+                    throw (RuntimeException)cause;
+                throw new AssertionError(x);
+            }
+		}
+		
+		static void invokePropertyChange(Object listener, Object ev) {
+			try {
+				propertyChangeMethod.invoke(listener, ev);
+			}catch (IllegalAccessException x) {
+                throw new AssertionError(x);
+            } catch (InvocationTargetException x) {
+                Throwable cause = x.getCause();
+                if (cause instanceof Error)
+                    throw (Error)cause;
+                if (cause instanceof RuntimeException)
+                    throw (RuntimeException)cause;
+                throw new AssertionError(x);
+            }
 		}
 	}
 }
